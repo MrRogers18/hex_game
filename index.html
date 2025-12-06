@@ -1,0 +1,1129 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>The Deep Dive: Blackfish Edition</title>
+    <!-- Tailwind CSS -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <!-- FontAwesome -->
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <!-- SheetJS (For Excel/CSV Import) -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+    
+    <style>
+        :root {
+            /* Colors */
+            --bg-color: #0f172a;
+            --hex-default: #334155;
+            --hex-hover: #475569;
+            --team-h-color: #f59e0b; /* Amber/Gold */
+            --team-v-color: #06b6d4; /* Cyan */
+            --text-main: #f8fafc;
+            
+            /* --- RESPONSIVE GEOMETRY ENGINE --- */
+            /* We use 'vmin' (Viewport Minimum) instead of pixels.
+               This guarantees the grid fits whether the screen is 4k or 720p. */
+            
+            /* Base Hex Size: roughly 9% of the screen size */
+            --hex-w: 9vmin; 
+            --hex-h: calc(var(--hex-w) * 1.1547); 
+            --hex-gap: 0.8vmin; 
+            
+            /* Bar Thickness scales with screen */
+            --bar-thick: 6vmin; 
+            
+            /* Calculated Offsets */
+            --row-indent: calc((var(--hex-w) / 2) + (var(--hex-gap) / 2));
+            --row-overlap: calc((var(--hex-h) * -0.25) + (var(--hex-gap) * 0.866)); 
+        }
+
+        body {
+            background-color: var(--bg-color);
+            color: var(--text-main);
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            overflow: hidden; /* Prevent scrolling entirely */
+            touch-action: manipulation;
+            user-select: none;
+            height: 100vh;
+            width: 100vw;
+            display: flex;
+            flex-direction: column;
+        }
+
+        /* --- STADIUM LAYOUT (CSS GRID) --- */
+        .stadium-container {
+            flex-grow: 1;
+            display: grid;
+            /* Left Bar | Game Grid | Right Bar */
+            grid-template-columns: var(--bar-thick) auto var(--bar-thick);
+            /* Top Bar | Game Grid | Bottom Bar */
+            grid-template-rows: var(--bar-thick) auto var(--bar-thick);
+            gap: 2vmin; /* Spacing scales with screen */
+            align-content: center;
+            justify-content: center;
+            padding: 2vmin;
+        }
+
+        .zone-bar {
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-weight: 900;
+            color: rgba(0,0,0,0.5);
+            text-transform: uppercase;
+            letter-spacing: 2px;
+            border-radius: 1vmin;
+            box-shadow: 0 0 1.5vmin rgba(0,0,0,0.3);
+            transition: all 0.3s;
+            font-size: 1.5vmin; /* Font scales */
+            position: relative;
+            z-index: 5;
+        }
+
+        .zone-bar:hover {
+            filter: brightness(1.2);
+            box-shadow: 0 0 3vmin currentColor;
+            color: rgba(0,0,0,0.8);
+        }
+
+        /* Top & Bottom Bars */
+        .zone-v {
+            background-color: var(--team-v-color);
+            width: 100%;
+            height: 100%;
+            flex-direction: row; 
+        }
+        
+        /* Left & Right Bars */
+        .zone-h {
+            background-color: var(--team-h-color);
+            width: 100%;
+            height: 100%;
+            flex-direction: column; 
+        }
+
+        .vertical-text {
+            writing-mode: vertical-rl;
+            text-orientation: mixed;
+            transform: rotate(180deg);
+            margin: 2vmin 0;
+        }
+        
+        .bar-top    { grid-column: 2; grid-row: 1; }
+        .bar-bottom { grid-column: 2; grid-row: 3; }
+        .bar-left   { grid-column: 1; grid-row: 2; }
+        .bar-right  { grid-column: 3; grid-row: 2; }
+        
+        .game-area {
+            grid-column: 2;
+            grid-row: 2;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            padding-bottom: 1vmin; 
+        }
+
+        /* --- Hexagon Grid Styling --- */
+        .hex-grid {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+        }
+
+        .hex-row {
+            display: flex;
+            margin-bottom: var(--row-overlap); 
+            position: relative; 
+            pointer-events: none; 
+        }
+
+        .hex-row:nth-child(even) {
+            margin-left: calc(var(--row-indent) * 2); 
+        }
+
+        .hex {
+            width: var(--hex-w);
+            height: var(--hex-h);
+            background-color: var(--hex-default);
+            clip-path: polygon(50% 0%, 100% 25%, 100% 75%, 50% 100%, 0% 75%, 0% 25%);
+            margin-right: var(--hex-gap);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 2.5vmin; /* Font scales with hex */
+            font-weight: bold;
+            cursor: pointer;
+            transition: all 0.2s ease-in-out;
+            position: relative;
+            -webkit-font-smoothing: antialiased;
+            pointer-events: auto; 
+        }
+
+        .hex:hover {
+            transform: scale(1.05);
+            z-index: 20;
+            background-color: var(--hex-hover);
+        }
+
+        .hex:active {
+            transform: scale(0.95);
+        }
+
+        .hex.team-h { background-color: var(--team-h-color); color: #000; box-shadow: inset 0 0 2vmin rgba(0,0,0,0.5);}
+        .hex.team-v { background-color: var(--team-v-color); color: #000; box-shadow: inset 0 0 2vmin rgba(0,0,0,0.5);}
+        .hex.locked { cursor: default; }
+
+        /* --- UI Elements --- */
+        .hud {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 1vmin 3vmin;
+            background: rgba(15, 23, 42, 0.9);
+            border-bottom: 1px solid #334155;
+            z-index: 50;
+            min-height: 60px; /* Ensure buttons don't get too small */
+        }
+
+        .team-indicator {
+            font-size: 2vmin;
+            font-weight: bold;
+            padding: 1vmin 3vmin;
+            border-radius: 50px;
+            border: 3px solid transparent;
+            min-width: 25vmin;
+            text-align: center;
+            opacity: 0.5;
+            transform: scale(0.9);
+            transition: all 0.3s;
+        }
+        
+        .team-indicator.active-turn {
+            opacity: 1;
+            transform: scale(1.1);
+            box-shadow: 0 0 20px rgba(255,255,255,0.2);
+            border-color: white;
+        }
+
+        .team-h-score { background: rgba(245, 158, 11, 0.1); color: var(--team-h-color); }
+        .team-v-score { background: rgba(6, 182, 212, 0.1); color: var(--team-v-color); }
+
+        /* --- Modals --- */
+        .modal-overlay {
+            position: fixed;
+            top: 0; left: 0; right: 0; bottom: 0;
+            background: rgba(0,0,0,0.85);
+            backdrop-filter: blur(5px);
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            z-index: 100;
+            visibility: hidden;
+            opacity: 0;
+            transition: opacity 0.2s;
+        }
+        .modal-overlay.active { visibility: visible; opacity: 1; }
+
+        .modal-card {
+            background: #1e293b;
+            padding: 4vmin;
+            border-radius: 1.5rem;
+            max-width: 90vw;
+            width: 800px;
+            text-align: center;
+            box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.5);
+            border: 1px solid #475569;
+            max-height: 90vh;
+            overflow-y: auto;
+        }
+
+        .btn {
+            padding: 1rem 2rem;
+            border-radius: 0.75rem;
+            font-weight: bold;
+            font-size: 1.25rem;
+            cursor: pointer;
+            transition: all 0.2s;
+            border: none;
+            margin: 10px;
+            display: inline-flex;
+            align-items: center;
+            gap: 10px;
+        }
+        
+        .btn-action { background-color: #3b82f6; color: white; }
+        .btn-neutral { background-color: #64748b; color: white; }
+        .btn-success { background-color: #10b981; color: white; }
+
+        /* MCQ Grid */
+        .mcq-grid {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 1.5vmin;
+            margin-top: 1.5vmin;
+        }
+
+        .btn-mcq {
+            width: 100%;
+            min-height: 100px;
+            font-size: 1.2rem;
+            background: #334155;
+            color: white;
+            border: 2px solid #475569;
+            border-radius: 12px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            padding: 15px;
+            white-space: normal;
+            line-height: 1.2;
+            transition: all 0.2s;
+        }
+        
+        .btn-mcq:hover:not(:disabled) { background: #475569; transform: translateY(-2px); }
+        .btn-mcq:disabled { cursor: not-allowed; opacity: 0.5; }
+        
+        .btn-correct { background-color: #10b981 !important; border-color: #059669 !important; transform: scale(1.05); color: white; }
+        .btn-wrong { background-color: #ef4444 !important; opacity: 1 !important; color: white; }
+        .btn-eliminated { background-color: #1e293b !important; color: #475569 !important; border-color: #334155 !important; box-shadow: none; transform: none;}
+
+        #q-text { font-size: 2rem; margin-bottom: 1rem; line-height: 1.2; font-weight: 600; color: white; }
+
+        /* Special Modes */
+        .free-tile-mode #q-text { color: #10b981; font-size: 3rem; }
+        .free-tile-mode .modal-card { border-top-color: #10b981; }
+
+        /* Rules Modal Specifics */
+        .rules-icon { font-size: 5rem; margin-bottom: 20px; color: #38bdf8; }
+        .rules-step { display: none; }
+        .rules-step.active { display: block; animation: fadeIn 0.3s; }
+        @keyframes fadeIn { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: translateY(0); } }
+
+        /* New Simple Visuals */
+        .goal-diagram {
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            height: 150px;
+            gap: 20px;
+            background: rgba(0,0,0,0.2);
+            border-radius: 12px;
+            padding: 20px;
+        }
+        
+        .diagram-bar { width: 30px; height: 100px; border-radius: 6px; }
+        .diagram-bar-h { height: 30px; width: 100%; border-radius: 6px; }
+        
+        .pulse-arrow { animation: pulseMove 1.5s infinite; font-size: 3rem; }
+        @keyframes pulseMove { 0% { transform: scale(1); opacity: 0.5; } 50% { transform: scale(1.2); opacity: 1; } 100% { transform: scale(1); opacity: 0.5; } }
+
+        /* Custom File Input */
+        .file-input-wrapper {
+            background: #334155;
+            padding: 20px;
+            border-radius: 8px;
+            border: 2px dashed #475569;
+            text-align: center;
+            cursor: pointer;
+            transition: all 0.2s;
+        }
+        .file-input-wrapper:hover { border-color: #64748b; background: #3b4961; }
+
+        #toast {
+            position: fixed; bottom: 40px; left: 50%; transform: translateX(-50%);
+            background-color: #10b981; color: white; padding: 16px 32px;
+            border-radius: 12px; font-size: 1.4rem; opacity: 0;
+            transition: opacity 0.5s; pointer-events: none; z-index: 200;
+            box-shadow: 0 10px 15px -3px rgba(0, 0, 0, 0.1);
+        }
+
+    </style>
+</head>
+<body>
+
+    <!-- HUD -->
+    <div class="hud">
+        <div class="flex items-center gap-2">
+            <button onclick="toggleSettings()" class="text-2xl text-slate-400 hover:text-white p-3 rounded-full hover:bg-slate-700 transition"><i class="fa-solid fa-gear"></i></button>
+            <button onclick="resetGame()" class="text-2xl text-slate-400 hover:text-red-400 p-3 rounded-full hover:bg-slate-700 transition"><i class="fa-solid fa-rotate-right"></i></button>
+            <h1 id="game-title" class="text-3xl font-bold tracking-wider text-white ml-2 hidden sm:block">THE DEEP DIVE</h1>
+        </div>
+        
+        <div class="flex gap-4">
+            <div id="score-h" class="team-indicator team-h-score">TEAM H: 0</div>
+            <div id="score-v" class="team-indicator team-v-score">TEAM V: 0</div>
+        </div>
+
+        <button onclick="toggleFullscreen()" class="text-2xl text-slate-400 hover:text-white p-3 rounded-full hover:bg-slate-700 transition"><i class="fa-solid fa-expand"></i></button>
+    </div>
+
+    <!-- Stadium Grid Container -->
+    <div class="stadium-container">
+        <!-- TOP BAR (Vertical Team) -->
+        <div class="zone-bar zone-v bar-top">
+            <i class="fa-solid fa-arrow-down mr-4"></i> START <i class="fa-solid fa-arrow-down ml-4"></i>
+        </div>
+        
+        <!-- LEFT BAR (Horizontal Team) -->
+        <div class="zone-bar zone-h bar-left">
+            <i class="fa-solid fa-arrow-right"></i> 
+            <span class="vertical-text">START</span> 
+            <i class="fa-solid fa-arrow-right"></i>
+        </div>
+        
+        <!-- GAME GRID -->
+        <div class="game-area">
+            <div id="grid-container" class="hex-grid"></div>
+        </div>
+        
+        <!-- RIGHT BAR (Horizontal Team) -->
+        <div class="zone-bar zone-h bar-right">
+            <i class="fa-solid fa-arrow-right"></i> 
+            <span class="vertical-text">GOAL</span> 
+            <i class="fa-solid fa-arrow-right"></i>
+        </div>
+
+        <!-- BOTTOM BAR (Vertical Team) -->
+        <div class="zone-bar zone-v bar-bottom">
+            <i class="fa-solid fa-arrow-down mr-4"></i> GOAL <i class="fa-solid fa-arrow-down ml-4"></i>
+        </div>
+    </div>
+
+
+    <!-- RULES MODAL -->
+    <div id="rules-modal" class="modal-overlay">
+        <div class="modal-card border-t-4 border-blue-500 max-w-[800px]">
+            <!-- Step 1: Goal -->
+            <div id="rule-step-0" class="rules-step active">
+                <h2 class="text-4xl font-bold mb-6 text-white">The Goal</h2>
+                <div class="grid grid-cols-2 gap-8 mb-6">
+                    <div class="bg-slate-800 p-6 rounded-xl border border-slate-700">
+                        <h3 class="text-amber-500 font-bold mb-4 text-xl">Team Horizontal</h3>
+                        <div class="goal-diagram">
+                            <div class="diagram-bar" style="background: var(--team-h-color)"></div>
+                            <i class="fa-solid fa-arrow-right pulse-arrow" style="color: var(--team-h-color)"></i>
+                            <div class="diagram-bar" style="background: var(--team-h-color)"></div>
+                        </div>
+                        <p class="text-slate-400 mt-4 font-bold">Connect Left to Right</p>
+                    </div>
+                    <div class="bg-slate-800 p-6 rounded-xl border border-slate-700">
+                        <h3 class="text-cyan-500 font-bold mb-4 text-xl">Team Vertical</h3>
+                        <div class="goal-diagram flex-col">
+                            <div class="diagram-bar-h" style="background: var(--team-v-color)"></div>
+                            <i class="fa-solid fa-arrow-down pulse-arrow" style="color: var(--team-v-color)"></i>
+                            <div class="diagram-bar-h" style="background: var(--team-v-color)"></div>
+                        </div>
+                        <p class="text-slate-400 mt-4 font-bold">Connect Top to Bottom</p>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Step 2: Gameplay -->
+            <div id="rule-step-1" class="rules-step">
+                <h2 class="text-4xl font-bold mb-6 text-white">How to Play</h2>
+                <div class="flex items-center justify-center gap-4 mb-8">
+                    <div class="flex flex-col items-center">
+                        <div class="w-20 h-24 bg-slate-700 flex items-center justify-center text-4xl rounded-lg mb-2"><i class="fa-solid fa-hand-pointer text-slate-400"></i></div>
+                        <span class="text-sm text-slate-400">1. Pick Tile</span>
+                    </div>
+                    <i class="fa-solid fa-arrow-right text-2xl text-slate-600"></i>
+                    <div class="flex flex-col items-center">
+                        <div class="w-20 h-24 bg-slate-700 flex items-center justify-center text-4xl rounded-lg mb-2 text-yellow-500 font-bold">?</div>
+                        <span class="text-sm text-slate-400">2. Answer</span>
+                    </div>
+                    <i class="fa-solid fa-arrow-right text-2xl text-slate-600"></i>
+                    <div class="flex flex-col items-center">
+                        <div class="w-20 h-24 bg-emerald-600 flex items-center justify-center text-4xl rounded-lg mb-2"><i class="fa-solid fa-check text-white"></i></div>
+                        <span class="text-sm text-slate-400">3. Claim It</span>
+                    </div>
+                </div>
+                <p class="text-xl text-slate-300 mb-8 leading-relaxed">
+                    <b class="text-red-400">Incorrect answers</b> pass the turn to the other team.<br>
+                    Watch out for hidden <b>Free Tiles</b>!
+                </p>
+            </div>
+
+            <!-- Step 3: Steal -->
+            <div id="rule-step-2" class="rules-step">
+                <i class="fa-solid fa-mask rules-icon text-red-500"></i>
+                <h2 class="text-4xl font-bold mb-4 text-white">The Steal</h2>
+                <p class="text-xl text-slate-300 mb-8 leading-relaxed">
+                    If your opponent connects their path, don't give up!<br>
+                    If you have <b>answered more questions correctly</b> than them,<br>
+                    you get one final <b>Sudden Death Question</b> to steal the win!
+                </p>
+                <div class="flex items-center justify-center gap-3 mb-4">
+                    <input type="checkbox" id="dont-show-again" class="w-5 h-5 cursor-pointer">
+                    <label for="dont-show-again" class="text-slate-400 cursor-pointer select-none">Don't show instructions again</label>
+                </div>
+            </div>
+
+            <!-- Navigation -->
+            <div class="flex justify-center gap-4 mt-4">
+                <button id="rules-next-btn" onclick="nextRule()" class="btn btn-action w-40">Next <i class="fa-solid fa-arrow-right ml-2"></i></button>
+            </div>
+        </div>
+    </div>
+
+    <!-- WHO GOES FIRST MODAL -->
+    <div id="start-modal" class="modal-overlay">
+        <div class="modal-card">
+            <h2 class="text-4xl font-bold mb-8 text-white">Who Goes First?</h2>
+            <div class="flex justify-center gap-8">
+                <button onclick="startGame('h')" class="btn" style="background: var(--team-h-color); color: black; font-size: 1.5rem;">Team Horizontal</button>
+                <button onclick="startGame('v')" class="btn" style="background: var(--team-v-color); color: black; font-size: 1.5rem;">Team Vertical</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Question MCQ Modal -->
+    <div id="question-modal" class="modal-overlay">
+        <div id="q-modal-card" class="modal-card border-t-4 border-t-yellow-500">
+            <div class="flex justify-between items-center mb-4">
+                <h3 id="modal-header" class="text-xl text-yellow-500 font-bold uppercase tracking-widest">Question</h3>
+                <div id="turn-indicator" class="text-sm px-3 py-1 rounded bg-slate-700">Turn: Team H</div>
+            </div>
+            
+            <div id="q-text">Loading...</div>
+            
+            <div id="mcq-container" class="mcq-grid">
+                <button class="btn-mcq" onclick="handleMCQ(0)"></button>
+                <button class="btn-mcq" onclick="handleMCQ(1)"></button>
+                <button class="btn-mcq" onclick="handleMCQ(2)"></button>
+                <button class="btn-mcq" onclick="handleMCQ(3)"></button>
+            </div>
+
+            <button id="free-claim-btn" onclick="claimFreeTile()" class="btn btn-action mt-6 hidden" style="font-size: 1.5rem;">Claim Free Tile</button>
+            <button onclick="closeModal()" class="btn btn-neutral text-sm mt-6">Cancel (Do not skip turn)</button>
+        </div>
+    </div>
+
+    <!-- Steal Win Modal -->
+    <div id="steal-modal" class="modal-overlay">
+        <div class="modal-card border-t-4 border-red-600">
+            <h3 class="text-3xl text-red-500 font-bold mb-2 uppercase tracking-widest animate-pulse">LAST CHANCE!</h3>
+            <p id="steal-context" class="text-slate-400 mb-6 text-lg">Team has blocked the path, but Opponent has a higher score!</p>
+            
+            <h2 class="text-2xl font-bold mb-8 text-white">How many orcas are currently in SeaWorld's collection?</h2>
+            
+            <div class="grid grid-cols-2 gap-4">
+                <button onclick="handleStealAnswer(15, this)" class="btn btn-mcq text-3xl">15</button>
+                <button onclick="handleStealAnswer(18, this)" class="btn btn-mcq text-3xl">18</button>
+                <button onclick="handleStealAnswer(22, this)" class="btn btn-mcq text-3xl">22</button>
+                <button onclick="handleStealAnswer(31, this)" class="btn btn-mcq text-3xl">31</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Win Modal -->
+    <div id="win-modal" class="modal-overlay">
+        <div class="modal-card">
+            <div class="mb-6"><i class="fa-solid fa-trophy text-6xl text-yellow-400"></i></div>
+            <h2 id="win-title" class="text-6xl font-bold mb-4">WINNER!</h2>
+            <p id="win-message" class="text-2xl mb-8 text-slate-300">Team Horizontal Connected the Ocean!</p>
+            <button onclick="resetGame()" class="btn btn-action text-xl"><i class="fa-solid fa-rotate-right"></i> New Game</button>
+            <button onclick="closeWinModal()" class="btn btn-neutral text-xl">Review Board</button>
+        </div>
+    </div>
+
+    <!-- Settings Modal -->
+    <div id="settings-modal" class="modal-overlay">
+        <div class="modal-card text-left w-full max-w-2xl">
+            <h2 class="text-3xl font-bold mb-6 text-center border-b border-slate-600 pb-4">Configuration</h2>
+            
+            <!-- Excel Import -->
+            <div class="mb-8 border-b border-slate-600 pb-8">
+                <label class="block mb-4 text-md font-bold text-white"><i class="fa-solid fa-file-csv text-emerald-500 mr-2"></i> Import Questions (Excel/CSV)</label>
+                <div class="file-input-wrapper">
+                    <input type="file" id="file-upload" accept=".csv, .xlsx, .xls" class="hidden">
+                    <label for="file-upload" class="cursor-pointer block">
+                        <i class="fa-solid fa-cloud-arrow-up text-4xl text-slate-400 mb-2"></i>
+                        <div class="text-slate-300 font-bold">Click to Upload File</div>
+                        <div class="text-xs text-slate-500 mt-2">Required Columns: Question, Correct Answer, Wrong 1, Wrong 2, Wrong 3</div>
+                    </label>
+                </div>
+            </div>
+
+            <div class="grid grid-cols-2 gap-6 mb-6">
+                <div>
+                    <label class="block mb-2 text-sm font-bold text-amber-500">Horizontal Team</label>
+                    <input id="input-name-h" type="text" class="w-full p-3 rounded bg-slate-700 text-white border border-slate-600 outline-none" value="Team Tilikum">
+                </div>
+                <div>
+                    <label class="block mb-2 text-sm font-bold text-cyan-500">Vertical Team</label>
+                    <input id="input-name-v" type="text" class="w-full p-3 rounded bg-slate-700 text-white border border-slate-600 outline-none" value="Team SeaWorld">
+                </div>
+            </div>
+            
+            <div class="mt-4">
+                <label class="block mb-2 text-sm font-bold">Current Question Bank (JSON)</label>
+                <textarea id="json-input" class="w-full h-32 p-3 rounded bg-slate-700 text-white border border-slate-600 font-mono text-xs focus:border-blue-500 outline-none"></textarea>
+            </div>
+            
+            <button onclick="openRules(true)" class="btn btn-action w-full mt-6">
+                <i class="fa-solid fa-circle-question mr-2"></i> How to Play
+            </button>
+
+            <div class="flex justify-between items-center border-t border-slate-600 pt-6 mt-6">
+                 <button onclick="saveSettings()" class="btn btn-neutral w-full">Close & Save</button>
+            </div>
+        </div>
+    </div>
+
+    <div id="toast"><i class="fa-solid fa-check-circle"></i> Message</div>
+
+    <script>
+        const ROWS = 6;
+        const COLS = 6; 
+        const MIN_FREE_TILES = 5; 
+        const MAX_QUESTIONS = (ROWS * COLS) - MIN_FREE_TILES;
+        
+        let mcqData = [
+            { q: "What do you hear has happened to a trainer at SeaWorld during the opening credits?", options: ["A whale has eaten a trainer.", "A trainer drowned accidentally.", "A trainer quit the job.", "A whale escaped the tank."], correct: 0 },
+            { q: "What do the trainers say is most important in getting a job as a trainer?", options: ["Good personality and strong swimming.", "A degree in Marine Biology.", "Experience with large animals.", "Scuba diving certification."], correct: 0 },
+            { q: "How did the orca capture teams try to capture the orcas?", options: ["Using boats, planes, and explosives.", "Using gentle nets and food lures.", "Using tranquilizer darts.", "Waiting for them to beach themselves."], correct: 0 },
+            { q: "How did the orcas try to escape capture?", options: ["Males acted as diversions to save young.", "They attacked the boats.", "They swam into deep water.", "They played dead."], correct: 0 },
+            { q: "What did the older orcas do when their young were captured?", options: ["Stayed and vocalised to them.", "Immediately swam away.", "Attacked the divers.", "Refused to eat."], correct: 0 },
+            { q: "How did SeaLand train Tilikum?", options: ["Punishment and food deprivation.", "Positive reinforcement only.", "Using clicker training.", "Mirroring other whales."], correct: 0 },
+            { q: "How were the orcas kept overnight at SeaLand?", options: ["In small dark metal boxes.", "In the main performance pool.", "In a netted sea pen.", "In a shallow medical pool."], correct: 0 },
+            { q: "How did the trainer at SeaLand die?", options: ["Pulled in and drowned by a whale.", "Slipped on the wet deck.", "Heart attack during show.", "Equipment malfunction."], correct: 0 },
+            { q: "How do orcas live in the wild?", options: ["In matriarchal families.", "Solitary lives.", "In pairs only.", "In random changing groups."], correct: 0 },
+            { q: "How long do orcas live in the wild?", options: ["Females up to 100, Males 50-60.", "Both live about 30 years.", "Females 40, Males 80.", "About 15 years on average."], correct: 0 },
+            { q: "What was found when scientists put an orca into an MRI machine?", options: ["Highly advanced emotional processing.", "Smaller brains than expected.", "Poor memory centers.", "Vision centers are dominant."], correct: 0 },
+            { q: "Describe how the orcas hunted the seal on the ice.", options: ["Created a wave to wash it off.", "Jumped onto the ice.", "Wait for it to sleep.", "Rammed the ice from below."], correct: 0 },
+            { q: "How much did Tilikum weigh in pounds?", options: ["12,000 lbs", "6,000 lbs", "20,000 lbs", "2,000 lbs"], correct: 0 },
+            { q: "How was Tilikum treated by the other orcas at SeaWorld?", options: ["Attacked and bullied by females.", "Accepted as the leader.", "Ignored completely.", "Protected by the mothers."], correct: 0 },
+            { q: "How did Tilikum interact with trainers initially?", options: ["Friendly and eager to please.", "Aggressive and distant.", "Fearful and shy.", "Unresponsive."], correct: 0 },
+            { q: "How did mother orcas react when young were moved away?", options: ["Long-range vocals and shaking.", "They became aggressive to trainers.", "They stopped swimming.", "They slept for days."], correct: 0 },
+            { q: "What lie did trainers tell visitors about lifespans?", options: ["They live longer in captivity.", "They live same length as humans.", "They only live 10 years.", "Wild whales die of disease."], correct: 0 },
+            { q: "How is orca behaviour different in captivity?", options: ["More aggressive due to confinement.", "More playful and relaxed.", "Less social with others.", "More intelligent."], correct: 0 },
+            { q: "What happened to Ken Peters with Kasatka?", options: ["Dragged to bottom by ankle repeatedly.", "Bitten on the arm.", "Pinned against the wall.", "Head-butted in the chest."], correct: 0 },
+            { q: "What happened to Daniel Dukes (the drifter)?", options: ["Found drowned and mutilated.", "Escaped with minor injuries.", "Arrested by security.", "Hid in the pump room."], correct: 0 },
+            { q: "Why is Tilikum so valuable to SeaWorld?", options: ["Used for sperm for breeding.", "He does the best tricks.", "He is the largest whale.", "He is the friendliest."], correct: 0 },
+            { q: "How did Tilikum kill Dawn Brancheau?", options: ["Pulled her in by arm/hair and attacked.", "Jumped on top of her.", "Drowned her during a show.", "Crushed her against the glass."], correct: 0 },
+            { q: "What does SeaWorld want visitors to believe?", options: ["Orcas are cuddly and happy.", "Orcas are dangerous predators.", "Orcas are dumb animals.", "Orcas need to be freed."], correct: 0 },
+            { q: "What argument is given to keep parks open?", options: ["Education and conservation.", "Profit and jobs.", "Entertainment value.", "Providing meat to public."], correct: 0 },
+            { q: "What argument is given to close the parks?", options: ["Captivity is cruel and abusive.", "Tickets are too expensive.", "The pools are too clean.", "Trainers are underpaid."], correct: 0 }
+        ];
+
+        let gameState = {
+            grid: [], 
+            teamNames: { h: "Team Tilikum", v: "Team SeaWorld" },
+            score: { h: 0, v: 0 },
+            winner: null,
+            turn: 'h'
+        };
+
+        let potentialWinner = null; 
+        let potentialStealer = null;
+        let activeHex = null; 
+        let currentOptions = []; 
+        let currentRuleStep = 0;
+        let rulesOpenedFromSettings = false;
+        let questionsUpdated = false;
+
+        function init() {
+            loadState();
+            
+            document.getElementById('file-upload').addEventListener('change', handleFileUpload);
+
+            const gameStarted = sessionStorage.getItem('gameStarted');
+            const skipRules = localStorage.getItem('deepDiveSkipRules') === 'true';
+
+            if (!gameStarted) {
+                if(!skipRules) {
+                    openRules(false);
+                } else {
+                    document.getElementById('start-modal').classList.add('active');
+                }
+            }
+            
+            renderGrid();
+            updateHUD();
+            document.getElementById('input-name-h').value = gameState.teamNames.h;
+            document.getElementById('input-name-v').value = gameState.teamNames.v;
+            document.getElementById('json-input').value = JSON.stringify(mcqData, null, 4);
+        }
+
+        // --- EXCEL IMPORT LOGIC ---
+        function handleFileUpload(e) {
+            const file = e.target.files[0];
+            if (!file) return;
+
+            const reader = new FileReader();
+            reader.onload = function(e) {
+                try {
+                    const data = new Uint8Array(e.target.result);
+                    const workbook = XLSX.read(data, {type: 'array'});
+                    const firstSheet = workbook.Sheets[workbook.SheetNames[0]];
+                    const jsonData = XLSX.utils.sheet_to_json(firstSheet);
+
+                    const newQuestions = jsonData.map(row => {
+                        if(!row['Question'] || !row['Correct Answer']) return null;
+                        return {
+                            q: row['Question'],
+                            options: [
+                                row['Correct Answer'],
+                                row['Wrong Answer 1'] || "Wrong 1",
+                                row['Wrong Answer 2'] || "Wrong 2",
+                                row['Wrong Answer 3'] || "Wrong 3"
+                            ],
+                            correct: 0 
+                        };
+                    }).filter(q => q !== null);
+
+                    if(newQuestions.length < 5) {
+                        alert("Error: File needs at least 5 questions.");
+                        return;
+                    }
+
+                    mcqData = newQuestions;
+                    document.getElementById('json-input').value = JSON.stringify(mcqData, null, 4);
+                    questionsUpdated = true; 
+                    showToast("Questions Imported! Click Save to Apply.");
+                    
+                } catch(err) {
+                    alert("Error parsing file.");
+                    console.error(err);
+                }
+            };
+            reader.readAsArrayBuffer(file);
+        }
+
+        // --- Rules Logic ---
+        function openRules(fromSettings) {
+            rulesOpenedFromSettings = fromSettings;
+            currentRuleStep = 0;
+            updateRuleUI();
+            
+            if(fromSettings) document.getElementById('settings-modal').classList.remove('active');
+            
+            document.getElementById('rules-modal').classList.add('active');
+        }
+
+        function updateRuleUI() {
+            document.querySelectorAll('.rules-step').forEach(el => el.classList.remove('active'));
+            document.getElementById(`rule-step-${currentRuleStep}`).classList.add('active');
+            
+            const btn = document.getElementById('rules-next-btn');
+            if (currentRuleStep === 2) {
+                btn.innerHTML = 'Ready! <i class="fa-solid fa-check ml-2"></i>';
+                btn.classList.add('btn-success');
+                btn.classList.remove('btn-action');
+            } else {
+                btn.innerHTML = 'Next <i class="fa-solid fa-arrow-right ml-2"></i>';
+                btn.classList.remove('btn-success');
+                btn.classList.add('btn-action');
+            }
+        }
+
+        function nextRule() {
+            if (currentRuleStep < 2) {
+                currentRuleStep++;
+                updateRuleUI();
+            } else {
+                finishRules();
+            }
+        }
+
+        function finishRules() {
+            const checkbox = document.getElementById('dont-show-again');
+            if (checkbox.checked) {
+                localStorage.setItem('deepDiveSkipRules', 'true');
+            }
+
+            document.getElementById('rules-modal').classList.remove('active');
+
+            if (!rulesOpenedFromSettings) {
+                document.getElementById('start-modal').classList.add('active');
+            }
+        }
+
+        // --- Turn Management ---
+        function startGame(team) {
+            gameState.turn = team;
+            if(gameState.grid.length === 0) createGridState();
+            saveState();
+            updateHUD();
+            document.getElementById('start-modal').classList.remove('active');
+            sessionStorage.setItem('gameStarted', 'true');
+            showToast(`Game Started! ${getTeamName(team)} goes first.`);
+        }
+
+        function switchTurn() {
+            gameState.turn = gameState.turn === 'h' ? 'v' : 'h';
+            saveState();
+            updateHUD();
+        }
+
+        // --- Grid Generation ---
+        function createGridState() {
+            gameState.grid = [];
+            let deck = [];
+            
+            // Randomize FULL Question Bank
+            let shuffledQuestions = [...mcqData];
+            for (let i = shuffledQuestions.length - 1; i > 0; i--) {
+                const j = Math.floor(Math.random() * (i + 1));
+                [shuffledQuestions[i], shuffledQuestions[j]] = [shuffledQuestions[j], shuffledQuestions[i]];
+            }
+
+            // Determine Count (Max 31)
+            const questionCount = Math.min(shuffledQuestions.length, MAX_QUESTIONS);
+            
+            // Build Deck
+            for(let i=0; i<questionCount; i++) {
+                const originalIndex = mcqData.indexOf(shuffledQuestions[i]);
+                deck.push({ type: 'question', qIndex: originalIndex });
+            }
+
+            // Fill Free Tiles
+            const freeTilesNeeded = (ROWS * COLS) - deck.length;
+            for(let i=0; i<freeTilesNeeded; i++) deck.push({ type: 'free' });
+
+            // Randomize Deck
+            for (let i = deck.length - 1; i > 0; i--) {
+                const j = Math.floor(Math.random() * (i + 1));
+                [deck[i], deck[j]] = [deck[j], deck[i]];
+            }
+
+            let cardIndex = 0;
+            for(let r=0; r<ROWS; r++) {
+                for(let c=0; c<COLS; c++) {
+                    let content = (cardIndex < deck.length) ? deck[cardIndex] : { type: 'free' };
+                    gameState.grid.push({ 
+                        r, c, 
+                        owner: null, 
+                        id: `r${r}-c${c}`, 
+                        content: content,
+                        eliminated: [] 
+                    });
+                    cardIndex++;
+                }
+            }
+        }
+
+        function renderGrid() {
+            const container = document.getElementById('grid-container');
+            container.innerHTML = '';
+            for(let r=0; r<ROWS; r++) {
+                const rowDiv = document.createElement('div');
+                rowDiv.className = 'hex-row';
+                for(let c=0; c<COLS; c++) {
+                    const cellData = gameState.grid.find(g => g.r === r && g.c === c);
+                    const hex = document.createElement('div');
+                    hex.className = 'hex';
+                    hex.dataset.r = r;
+                    hex.dataset.c = c;
+                    
+                    if (cellData.owner === 'h') hex.classList.add('team-h');
+                    if (cellData.owner === 'v') hex.classList.add('team-v');
+                    if (cellData.owner) hex.classList.add('locked');
+
+                    hex.innerHTML = (r * COLS) + c + 1; 
+                    if(cellData.owner) hex.innerHTML = ""; 
+
+                    hex.onclick = () => handleHexClick(r, c);
+                    rowDiv.appendChild(hex);
+                }
+                container.appendChild(rowDiv);
+            }
+        }
+
+        function handleHexClick(r, c) {
+            if(gameState.winner) { showToast("Game Over."); return; }
+            const cell = gameState.grid.find(g => g.r === r && g.c === c);
+            if (cell.owner) { showToast("Tile already taken!"); return; }
+            activeHex = cell;
+            if(cell.content.type === 'free') openFreeModal();
+            else openQuestionModal(mcqData[cell.content.qIndex], cell);
+        }
+
+        function openQuestionModal(qData, cell) {
+            const modal = document.getElementById('question-modal');
+            const card = document.getElementById('q-modal-card');
+            const header = document.getElementById('modal-header');
+            const qEl = document.getElementById('q-text');
+            const mcqContainer = document.getElementById('mcq-container');
+            const freeBtn = document.getElementById('free-claim-btn');
+            const turnInd = document.getElementById('turn-indicator');
+            
+            card.classList.remove('free-tile-mode', 'border-t-emerald-500');
+            card.classList.add('border-t-yellow-500');
+            header.textContent = "QUESTION";
+            header.className = "text-xl text-yellow-500 font-bold uppercase tracking-widest";
+            mcqContainer.style.display = 'grid';
+            freeBtn.classList.add('hidden');
+            
+            turnInd.textContent = `${getTeamName(gameState.turn)}'s Turn`;
+            turnInd.style.backgroundColor = gameState.turn === 'h' ? 'var(--team-h-color)' : 'var(--team-v-color)';
+            turnInd.style.color = '#000';
+            turnInd.style.fontWeight = 'bold';
+
+            qEl.textContent = qData.q;
+            
+            let indices = [0, 1, 2, 3];
+            indices.sort(() => Math.random() - 0.5);
+            currentOptions = indices;
+
+            const buttons = mcqContainer.querySelectorAll('.btn-mcq');
+            buttons.forEach((btn, i) => {
+                const realIndex = indices[i];
+                btn.textContent = qData.options[realIndex];
+                btn.className = 'btn-mcq'; 
+                btn.disabled = false;
+                btn.onclick = () => handleMCQAnswer(realIndex, btn);
+                if(cell.eliminated && cell.eliminated.includes(realIndex)) {
+                    btn.classList.add('btn-eliminated');
+                    btn.disabled = true;
+                }
+            });
+            modal.classList.add('active');
+        }
+
+        function openFreeModal() {
+            const modal = document.getElementById('question-modal');
+            const card = document.getElementById('q-modal-card');
+            const header = document.getElementById('modal-header');
+            const qEl = document.getElementById('q-text');
+            const mcqContainer = document.getElementById('mcq-container');
+            const freeBtn = document.getElementById('free-claim-btn');
+            const turnInd = document.getElementById('turn-indicator');
+            
+            card.classList.add('free-tile-mode', 'border-t-emerald-500');
+            card.classList.remove('border-t-yellow-500');
+            header.textContent = "LUCKY DIP";
+            header.className = "text-xl text-emerald-500 font-bold uppercase tracking-widest";
+            
+            turnInd.textContent = `${getTeamName(gameState.turn)} Gets This Tile!`;
+            turnInd.style.backgroundColor = gameState.turn === 'h' ? 'var(--team-h-color)' : 'var(--team-v-color)';
+            
+            qEl.textContent = "FREE TILE!";
+            mcqContainer.style.display = 'none';
+            freeBtn.classList.remove('hidden');
+            freeBtn.textContent = `Award to ${getTeamName(gameState.turn)}`;
+            
+            modal.classList.add('active');
+        }
+
+        function handleMCQAnswer(optionIndex, btnElement) {
+            if(optionIndex === 0) {
+                btnElement.classList.add('btn-correct');
+                setTimeout(() => awardTile(gameState.turn), 800);
+            } else {
+                btnElement.classList.add('btn-eliminated'); 
+                activeHex.eliminated.push(optionIndex); 
+                saveState();
+                showToast("Incorrect. Turn passes.");
+                setTimeout(() => { closeModal(); switchTurn(); }, 1000);
+            }
+        }
+
+        function claimFreeTile() { awardTile(gameState.turn); }
+
+        function awardTile(team) {
+            if (!activeHex) return;
+            activeHex.owner = team;
+            if (team === 'h') gameState.score.h++;
+            else gameState.score.v++;
+            saveState();
+            renderGrid();
+            updateHUD();
+            closeModal();
+            setTimeout(() => checkWinner(team), 300);
+        }
+
+        function closeModal() {
+            document.getElementById('question-modal').classList.remove('active');
+            activeHex = null;
+        }
+
+        function checkWinner(lastPlayer) {
+            if (checkPath('h')) handlePotentialWin('h');
+            else if (checkPath('v')) handlePotentialWin('v');
+            else { if(lastPlayer) switchTurn(); }
+        }
+
+        function handlePotentialWin(pathBuilder) {
+            const otherTeam = pathBuilder === 'h' ? 'v' : 'h';
+            if (gameState.score[otherTeam] > gameState.score[pathBuilder]) {
+                triggerStealAttempt(pathBuilder, otherTeam);
+            } else {
+                triggerWin(pathBuilder);
+            }
+        }
+
+        function triggerStealAttempt(pathBuilder, stealer) {
+            potentialWinner = pathBuilder;
+            potentialStealer = stealer;
+            const modal = document.getElementById('steal-modal');
+            const ctx = document.getElementById('steal-context');
+            const pName = getTeamName(pathBuilder);
+            const sName = getTeamName(stealer);
+            ctx.textContent = `${pName} has connected the path, but ${sName} has answered more questions correctly!`;
+            const buttons = document.querySelectorAll('#steal-modal .btn-mcq');
+            buttons.forEach(b => {
+                b.disabled = false;
+                b.classList.remove('btn-correct', 'btn-wrong');
+            });
+            modal.classList.add('active');
+        }
+
+        function handleStealAnswer(value, btnElement) {
+            const correctValue = 18;
+            const buttons = document.querySelectorAll('#steal-modal .btn-mcq');
+            buttons.forEach(b => b.disabled = true);
+            if(value === correctValue) {
+                btnElement.classList.add('btn-correct');
+                setTimeout(() => {
+                    document.getElementById('steal-modal').classList.remove('active');
+                    triggerWin(potentialStealer, true);
+                }, 2000);
+            } else {
+                btnElement.classList.add('btn-wrong');
+                buttons.forEach(b => { if(parseInt(b.textContent) === correctValue) b.classList.add('btn-correct'); });
+                setTimeout(() => {
+                    document.getElementById('steal-modal').classList.remove('active');
+                    triggerWin(potentialWinner, false);
+                }, 2500);
+            }
+        }
+
+        function triggerWin(team, stolen = false) {
+            gameState.winner = team; 
+            saveState();
+            const modal = document.getElementById('win-modal');
+            const title = document.getElementById('win-title');
+            const msg = document.getElementById('win-message');
+            const teamName = getTeamName(team);
+            const color = team === 'h' ? 'var(--team-h-color)' : 'var(--team-v-color)';
+            title.style.color = color;
+            title.textContent = `${teamName} WINS!`;
+            if (stolen) msg.textContent = "THEY STOLE THE WIN WITH THE FINAL QUESTION!";
+            else msg.textContent = `${teamName} has successfully connected their path.`;
+            modal.classList.add('active');
+            createConfetti(team === 'h' ? '🟧' : '🟦');
+        }
+
+        function checkPath(team) {
+            const nodes = gameState.grid.filter(n => n.owner === team);
+            if (nodes.length < (team === 'h' ? COLS : ROWS)) return false;
+            const getNeighbors = (node) => {
+                const isOddRow = node.r % 2 !== 0; 
+                const directions = isOddRow ? [[-1, 0], [-1, 1], [0, -1], [0, 1], [1, 0], [1, 1]] : [[-1, -1], [-1, 0], [0, -1], [0, 1], [1, -1], [1, 0]]; 
+                return directions.map(d => nodes.find(n => n.r === node.r + d[0] && n.c === node.c + d[1])).filter(n => n !== undefined);
+            };
+            let queue = (team === 'h') ? nodes.filter(n => n.c === 0) : nodes.filter(n => n.r === 0);
+            let visited = new Set();
+            while(queue.length > 0) {
+                let current = queue.shift();
+                if (visited.has(current.id)) continue;
+                visited.add(current.id);
+                if (team === 'h' && current.c === COLS - 1) return true;
+                if (team === 'v' && current.r === ROWS - 1) return true;
+                let neighbors = getNeighbors(current);
+                neighbors.forEach(n => { if(!visited.has(n.id)) queue.push(n); });
+            }
+            return false;
+        }
+
+        function getTeamName(code) { return code === 'h' ? gameState.teamNames.h : gameState.teamNames.v; }
+
+        function updateHUD() {
+            const hEl = document.getElementById('score-h');
+            const vEl = document.getElementById('score-v');
+            hEl.textContent = `${gameState.teamNames.h}: ${gameState.score.h}`;
+            vEl.textContent = `${gameState.teamNames.v}: ${gameState.score.v}`;
+            hEl.classList.remove('active-turn');
+            vEl.classList.remove('active-turn');
+            if(!gameState.winner && gameState.grid.length > 0) {
+                if(gameState.turn === 'h') hEl.classList.add('active-turn');
+                else vEl.classList.add('active-turn');
+            }
+        }
+
+        function createConfetti(emoji) {
+            for(let i=0; i<50; i++) {
+                const el = document.createElement('div');
+                el.innerText = emoji;
+                el.style.position = 'fixed';
+                el.style.left = Math.random() * 100 + 'vw';
+                el.style.top = '-50px';
+                el.style.fontSize = '2rem';
+                el.style.zIndex = 200;
+                el.style.transition = `top ${2 + Math.random() * 2}s ease-in, transform 2s linear`;
+                document.body.appendChild(el);
+                setTimeout(() => { el.style.top = '110vh'; el.style.transform = `rotate(${Math.random() * 360}deg)`; }, 100);
+                setTimeout(() => el.remove(), 4000);
+            }
+        }
+
+        function closeWinModal() { document.getElementById('win-modal').classList.remove('active'); }
+        function toggleSettings() { document.getElementById('settings-modal').classList.toggle('active'); }
+
+        function saveSettings() {
+            gameState.teamNames.h = document.getElementById('input-name-h').value;
+            gameState.teamNames.v = document.getElementById('input-name-v').value;
+            try {
+                const textData = JSON.parse(document.getElementById('json-input').value);
+                if(JSON.stringify(textData) !== JSON.stringify(mcqData)) {
+                     mcqData = textData;
+                     questionsUpdated = true;
+                }
+            } catch(e) {}
+
+            if(questionsUpdated) {
+                resetGame();
+                showToast("New questions loaded! Game reset.");
+            } else {
+                saveState();
+                updateHUD();
+                showToast("Settings Saved");
+            }
+            toggleSettings();
+            questionsUpdated = false; 
+        }
+
+        function resetGame() {
+            createGridState();
+            gameState.score = { h: 0, v: 0 };
+            gameState.winner = null;
+            sessionStorage.removeItem('gameStarted');
+            saveState();
+            document.getElementById('settings-modal').classList.remove('active');
+            closeWinModal();
+            document.getElementById('steal-modal').classList.remove('active');
+            init(); 
+        }
+
+        function saveState() { 
+            localStorage.setItem('deepDiveStateV19', JSON.stringify(gameState)); 
+            localStorage.setItem('deepDiveDataV19', JSON.stringify(mcqData)); 
+        }
+        
+        function loadState() {
+            const savedState = localStorage.getItem('deepDiveStateV19');
+            const savedData = localStorage.getItem('deepDiveDataV19');
+            if (savedData) mcqData = JSON.parse(savedData);
+            if (savedState) gameState = JSON.parse(savedState);
+            else createGridState();
+        }
+
+        function toggleFullscreen() {
+            if (!document.fullscreenElement) document.documentElement.requestFullscreen();
+            else if (document.exitFullscreen) document.exitFullscreen();
+        }
+
+        function showToast(msg) {
+            const t = document.getElementById('toast');
+            t.innerHTML = `<i class="fa-solid fa-info-circle"></i> ${msg}`;
+            t.style.opacity = 1;
+            setTimeout(() => t.style.opacity = 0, 3000);
+        }
+
+        init();
+    </script>
+</body>
+</html>
