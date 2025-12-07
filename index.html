@@ -401,12 +401,10 @@
         <div class="modal-card border-t-4 border-red-600">
             <h3 class="text-3xl text-red-500 font-bold mb-2 uppercase tracking-widest animate-pulse">LAST CHANCE!</h3>
             <p id="steal-context" class="text-slate-400 mb-6 text-lg">Team has blocked the path, but Opponent has a higher score!</p>
-            <h2 class="text-2xl font-bold mb-8 text-white">How many orcas are currently in SeaWorld's collection?</h2>
-            <div class="grid grid-cols-2 gap-4">
-                <button onclick="handleStealAnswer(15, this)" class="btn btn-mcq text-3xl">15</button>
-                <button onclick="handleStealAnswer(18, this)" class="btn btn-mcq text-3xl">18</button>
-                <button onclick="handleStealAnswer(22, this)" class="btn btn-mcq text-3xl">22</button>
-                <button onclick="handleStealAnswer(31, this)" class="btn btn-mcq text-3xl">31</button>
+            
+            <!-- DYNAMIC STEAL CONTENT -->
+            <div id="steal-content">
+                <!-- Content will be injected here via JS -->
             </div>
         </div>
     </div>
@@ -434,6 +432,7 @@
                         <i class="fa-solid fa-cloud-arrow-up text-4xl text-slate-400 mb-2"></i>
                         <div class="text-slate-300 font-bold">Click to Upload File</div>
                         <div class="text-xs text-slate-500 mt-2">Required Columns: Question, Correct Answer, Wrong 1, Wrong 2, Wrong 3</div>
+                        <div class="text-xs text-yellow-500 mt-1">Start a question with <b>(STEAL)</b> to set it as the Steal Question.</div>
                     </label>
                 </div>
             </div>
@@ -493,6 +492,13 @@
             { q: "What argument is given to close the parks?", options: ["Captivity is cruel and abusive.", "Tickets are too expensive.", "The pools are too clean.", "Trainers are underpaid."], correct: 0 }
         ];
 
+        // NEW: Steal Question Data Holder (Default)
+        let stealData = {
+            q: "How many orcas are currently in SeaWorld's collection?",
+            options: ["18", "15", "22", "31"],
+            correct: 0
+        };
+
         let gameState = { grid: [], teamNames: { h: "Team Tilikum", v: "Team SeaWorld" }, score: { h: 0, v: 0 }, winner: null, turn: 'h' };
         let potentialWinner = null; let potentialStealer = null; let activeHex = null; let currentOptions = []; let currentRuleStep = 0; let rulesOpenedFromSettings = false; let questionsUpdated = false;
 
@@ -534,16 +540,33 @@
                     const data = new Uint8Array(e.target.result);
                     const workbook = XLSX.read(data, {type: 'array'});
                     const jsonData = XLSX.utils.sheet_to_json(workbook.Sheets[workbook.SheetNames[0]]);
-                    const newQuestions = jsonData.map(row => {
+                    
+                    let parsedQuestions = jsonData.map(row => {
                         if(!row['Question'] || !row['Correct Answer']) return null;
                         return { q: row['Question'], options: [row['Correct Answer'], row['Wrong Answer 1'] || "Wrong 1", row['Wrong Answer 2'] || "Wrong 2", row['Wrong Answer 3'] || "Wrong 3"], correct: 0 };
                     }).filter(q => q !== null);
 
-                    if(newQuestions.length < 5) { alert("Error: File needs at least 5 questions."); return; }
-                    mcqData = newQuestions;
+                    if(parsedQuestions.length < 5) { alert("Error: File needs at least 5 questions."); return; }
+
+                    // --- NEW STEAL LOGIC ---
+                    // 1. Look for explicit tag
+                    const explicitStealIndex = parsedQuestions.findIndex(q => q.q.trim().toUpperCase().startsWith('(STEAL)'));
+                    
+                    if (explicitStealIndex !== -1) {
+                        // Extract and Remove tag
+                        let sQ = parsedQuestions[explicitStealIndex];
+                        sQ.q = sQ.q.replace(/^\(STEAL\)\s*/i, ''); // Clean the tag
+                        stealData = sQ;
+                        parsedQuestions.splice(explicitStealIndex, 1);
+                    } else {
+                        // Fallback: Take the last question
+                        stealData = parsedQuestions.pop();
+                    }
+
+                    mcqData = parsedQuestions;
                     document.getElementById('json-input').value = JSON.stringify(mcqData, null, 4);
                     questionsUpdated = true; 
-                    showToast("Questions Imported! Click Save to Apply.");
+                    showToast("Questions & Steal Data Imported!");
                 } catch(err) { alert("Error parsing file."); }
             };
             reader.readAsArrayBuffer(file);
@@ -751,22 +774,54 @@
             potentialWinner = pathBuilder; potentialStealer = stealer;
             const modal = document.getElementById('steal-modal');
             const ctx = document.getElementById('steal-context');
+            const content = document.getElementById('steal-content'); // Use the container
+            
             ctx.textContent = `${getTeamName(pathBuilder)} has connected the path, but ${getTeamName(stealer)} has answered more questions correctly!`;
-            const buttons = document.querySelectorAll('#steal-modal .btn-mcq');
-            buttons.forEach(b => { b.disabled = false; b.classList.remove('btn-correct', 'btn-wrong'); });
+            
+            // --- BUILD DYNAMIC STEAL MODAL ---
+            
+            // 1. Shuffle Options indices [0,1,2,3]
+            let indices = [0, 1, 2, 3];
+            indices.sort(() => Math.random() - 0.5);
+            
+            // 2. Generate HTML
+            let html = `
+                <h2 class="text-2xl font-bold mb-8 text-white">${stealData.q}</h2>
+                <div class="grid grid-cols-2 gap-4">
+            `;
+            
+            indices.forEach(idx => {
+                // We pass the REAL index (where 0 is correct) to the handler
+                html += `<button onclick="handleStealAnswer(${idx}, this)" class="btn btn-mcq text-3xl">${stealData.options[idx]}</button>`;
+            });
+            
+            html += `</div>`;
+            content.innerHTML = html;
+
             modal.classList.add('active');
         }
 
-        function handleStealAnswer(value, btnElement) {
-            const correctValue = 18;
-            const buttons = document.querySelectorAll('#steal-modal .btn-mcq');
+        function handleStealAnswer(optionIndex, btnElement) {
+            // Disable all buttons immediately
+            const buttons = document.querySelectorAll('#steal-content .btn-mcq');
             buttons.forEach(b => b.disabled = true);
-            if(value === correctValue) {
+
+            // 0 is always correct index in our data structure
+            if(optionIndex === 0) {
+                // SUCCESS
                 btnElement.classList.add('btn-correct');
                 setTimeout(() => { document.getElementById('steal-modal').classList.remove('active'); triggerWin(potentialStealer, true); }, 2000);
             } else {
+                // FAIL
                 btnElement.classList.add('btn-wrong');
-                buttons.forEach(b => { if(parseInt(b.textContent) === correctValue) b.classList.add('btn-correct'); });
+                // Highlight correct one
+                // We need to find the button that has the onclick="handleStealAnswer(0, ...)"
+                buttons.forEach(b => {
+                    // Quick hack to find correct button based on text or onclick attr
+                    // Safest is to check text content against option[0]
+                    if(b.textContent === stealData.options[0]) b.classList.add('btn-correct');
+                });
+                
                 setTimeout(() => { document.getElementById('steal-modal').classList.remove('active'); triggerWin(potentialWinner, false); }, 2500);
             }
         }
@@ -900,11 +955,18 @@
             document.getElementById('home-screen').classList.remove('hidden');
         }
 
-        function saveState() { localStorage.setItem('deepDiveStateV22', JSON.stringify(gameState)); localStorage.setItem('deepDiveDataV22', JSON.stringify(mcqData)); }
+        function saveState() { 
+            localStorage.setItem('deepDiveStateV24', JSON.stringify(gameState)); 
+            localStorage.setItem('deepDiveDataV24', JSON.stringify(mcqData)); 
+            localStorage.setItem('deepDiveStealV24', JSON.stringify(stealData));
+        }
         function loadState() {
-            const savedState = localStorage.getItem('deepDiveStateV22');
-            const savedData = localStorage.getItem('deepDiveDataV22');
+            const savedState = localStorage.getItem('deepDiveStateV24');
+            const savedData = localStorage.getItem('deepDiveDataV24');
+            const savedSteal = localStorage.getItem('deepDiveStealV24');
+            
             if (savedData) mcqData = JSON.parse(savedData);
+            if (savedSteal) stealData = JSON.parse(savedSteal);
             if (savedState) gameState = JSON.parse(savedState);
             else createGridState();
         }
